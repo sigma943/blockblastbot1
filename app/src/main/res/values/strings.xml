@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Block Blast Bot</string>
+    <string name="accessibility_description">Bot do automatycznego grania w Block Blast</string>
+    <string name="btn_start">▶ START BOT</string>
+    <string name="btn_stop">⏹ STOP BOT</string>
+    <string name="status_off">Bot wyłączony</string>
+    <string name="status_on">Bot aktywny 🟢</string>
+    <string name="enable_accessibility">Włącz dostępność</string>
+</resources>
