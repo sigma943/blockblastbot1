@@ -57,7 +57,7 @@ public class BlockBlastService extends AccessibilityService {
         if (!botActive || isBusy) return;
         isBusy = true;
 
-        takeScreenshot(DEFAULT_DISPLAY,
+        takeScreenshot(android.view.Display.DEFAULT_DISPLAY,
             getMainExecutor(),
             new TakeScreenshotCallback() {
                 @Override
