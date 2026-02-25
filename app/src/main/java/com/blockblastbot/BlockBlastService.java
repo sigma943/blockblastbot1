@@ -151,13 +151,18 @@ public class BlockBlastService extends AccessibilityService {
         }
     }
 
-    private void executeDrag(float x1, float y1, float x2, float y2) {
-        Path path = new Path();
-        path.moveTo(x1, y1);
-        path.lineTo(x2, y2);
+        private void executeDrag(float x1, float y1, float x2, float y2) {
+        Path pressPath = new Path();
+        pressPath.moveTo(x1, y1);
+        GestureDescription.StrokeDescription press =
+            new GestureDescription.StrokeDescription(pressPath, 0, 400, true);
+        Path dragPath = new Path();
+        dragPath.moveTo(x1, y1);
+        dragPath.lineTo(x2, y2);
+        GestureDescription.StrokeDescription drag =
+            press.continueStroke(dragPath, 0, 800, false);
         GestureDescription gesture = new GestureDescription.Builder()
-            .addStroke(new GestureDescription.StrokeDescription(path, 0, 600))
-            .build();
+            .addStroke(drag).build();
         dispatchGesture(gesture, null, null);
     }
 
