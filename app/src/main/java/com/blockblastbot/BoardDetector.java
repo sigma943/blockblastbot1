@@ -9,12 +9,14 @@ public class BoardDetector {
 
     public static final int GRID_SIZE = 8;
 
-    private static final float BOARD_TOP    = 0.23f;
-    private static final float BOARD_BOTTOM = 0.42f;
-    private static final float BOARD_LEFT   = 0.04f;
-    private static final float BOARD_RIGHT  = 0.96f;
-    private static final float PIECES_TOP   = 0.73f;
-    private static final float PIECES_BOTTOM = 0.80f;
+    // Auto-calibrated values
+    private static float boardTop    = 0.23f;
+    private static float boardBottom = 0.42f;
+    private static float boardLeft   = 0.04f;
+    private static float boardRight  = 0.96f;
+    private static float piecesTop   = 0.73f;
+    private static float piecesBottom = 0.80f;
+    private static boolean calibrated = false;
 
     public static class DetectionResult {
         public boolean[][] board = new boolean[GRID_SIZE][GRID_SIZE];
@@ -26,41 +28,41 @@ public class BoardDetector {
         DetectionResult result = new DetectionResult();
         if (screenshot == null) return result;
 
+        if (!calibrated) autoCalibrate(screenshot);
+
         int w = screenshot.getWidth();
         int h = screenshot.getHeight();
 
-        int boardTop    = (int)(h * BOARD_TOP);
-        int boardBottom = (int)(h * BOARD_BOTTOM);
-        int boardLeft   = (int)(w * BOARD_LEFT);
-        int boardRight  = (int)(w * BOARD_RIGHT);
-        int boardW = boardRight - boardLeft;
-        int boardH = boardBottom - boardTop;
-        int cellW = boardW / GRID_SIZE;
-        int cellH = boardH / GRID_SIZE;
+        int bTop    = (int)(h * boardTop);
+        int bBottom = (int)(h * boardBottom);
+        int bLeft   = (int)(w * boardLeft);
+        int bRight  = (int)(w * boardRight);
+        int boardW  = bRight - bLeft;
+        int boardH  = bBottom - bTop;
+        int cellW   = boardW / GRID_SIZE;
+        int cellH   = boardH / GRID_SIZE;
 
-        float bgBrightness = getBrightness(screenshot, boardLeft + 2, boardTop + 2);
+        float bgBrightness = getBrightness(screenshot, bLeft + 2, bTop + 2);
 
         for (int row = 0; row < GRID_SIZE; row++) {
             for (int col = 0; col < GRID_SIZE; col++) {
-                int cx = boardLeft + col * cellW + cellW / 2;
-                int cy = boardTop + row * cellH + cellH / 2;
-                float brightness = getBrightness(screenshot, cx, cy);
-                result.board[row][col] = brightness > bgBrightness + 25;
+                int cx = bLeft + col * cellW + cellW / 2;
+                int cy = bTop + row * cellH + cellH / 2;
+                result.board[row][col] = getBrightness(screenshot, cx, cy) > bgBrightness + 25;
             }
         }
 
-        int piecesTop    = (int)(h * PIECES_TOP);
-        int piecesBottom = (int)(h * PIECES_BOTTOM);
-        int piecesLeft   = (int)(w * 0.04f);
-        int piecesRight  = (int)(w * 0.96f);
-        int pw = piecesRight - piecesLeft;
-        int ph = piecesBottom - piecesTop;
+        int pTop  = (int)(h * piecesTop);
+        int pBot  = (int)(h * piecesBottom);
+        int pLeft = (int)(w * 0.04f);
+        int pRight = (int)(w * 0.96f);
+        int pw = pRight - pLeft;
         int slotW = pw / 3;
 
         for (int i = 0; i < 3; i++) {
-            int x1 = piecesLeft + i * slotW;
+            int x1 = pLeft + i * slotW;
             int x2 = x1 + slotW;
-            int[][] cells = detectPieceShape(screenshot, x1, piecesTop, x2, piecesBottom);
+            int[][] cells = detectPieceShape(screenshot, x1, pTop, x2, pBot);
             if (cells != null && cells.length > 0) {
                 result.pieces.add(new AIEngine.Shape(cells, i));
             }
@@ -72,6 +74,90 @@ public class BoardDetector {
 
         result.valid = filledCount > 0 && filledCount < 62;
         return result;
+    }
+
+    private static void autoCalibrate(Bitmap bmp) {
+        int w = bmp.getWidth();
+        int h = bmp.getHeight();
+
+        // Find bright rows (blocks are brighter than background)
+        int[] rowBrightness = new int[h];
+        int step = Math.max(1, w / 50);
+        for (int y = 0; y < h; y++) {
+            int sum = 0;
+            int count = 0;
+            for (int x = w/4; x < 3*w/4; x += step) {
+                sum += getBrightness(bmp, x, y);
+                count++;
+            }
+            rowBrightness[y] = count > 0 ? sum / count : 0;
+        }
+
+        // Find overall background brightness
+        int bgBr = rowBrightness[h/2];
+
+        // Find board region (large area with many bright pixels)
+        int boardStartY = -1, boardEndY = -1;
+        int piecesStartY = -1, piecesEndY = -1;
+
+        // Scan for bright regions
+        int consecutiveBright = 0;
+        int consecutiveDark = 0;
+        List<int[]> brightRegions = new ArrayList<>();
+        int regionStart = -1;
+
+        for (int y = (int)(h * 0.1f); y < (int)(h * 0.95f); y++) {
+            boolean bright = rowBrightness[y] > bgBr + 15;
+            if (bright) {
+                if (regionStart < 0) regionStart = y;
+                consecutiveBright++;
+                consecutiveDark = 0;
+            } else {
+                if (consecutiveDark > 20 && regionStart >= 0 && consecutiveBright > 30) {
+                    brightRegions.add(new int[]{regionStart, y - consecutiveDark});
+                    regionStart = -1;
+                    consecutiveBright = 0;
+                }
+                consecutiveDark++;
+            }
+        }
+        if (regionStart >= 0 && consecutiveBright > 30) {
+            brightRegions.add(new int[]{regionStart, (int)(h * 0.95f)});
+        }
+
+        // Board = largest region, pieces = second largest after board
+        if (brightRegions.size() >= 1) {
+            // Sort by size
+            brightRegions.sort((a, b) -> (b[1]-b[0]) - (a[1]-a[0]));
+            int[] boardRegion = brightRegions.get(0);
+            boardStartY = boardRegion[0];
+            boardEndY = boardRegion[1];
+
+            if (brightRegions.size() >= 2) {
+                int[] piecesRegion = brightRegions.get(1);
+                piecesStartY = piecesRegion[0];
+                piecesEndY = piecesRegion[1];
+            }
+        }
+
+        if (boardStartY > 0 && boardEndY > boardStartY) {
+            boardTop    = (float)(boardStartY - 10) / h;
+            boardBottom = (float)(boardEndY + 10) / h;
+            boardTop    = Math.max(0.1f, boardTop);
+            boardBottom = Math.min(0.9f, boardBottom);
+        }
+
+        if (piecesStartY > 0 && piecesEndY > piecesStartY) {
+            piecesTop    = (float)(piecesStartY - 10) / h;
+            piecesBottom = (float)(piecesEndY + 10) / h;
+            piecesTop    = Math.max(0.5f, piecesTop);
+            piecesBottom = Math.min(0.95f, piecesBottom);
+        }
+
+        calibrated = true;
+        android.util.Log.d("BoardDetector",
+            "Calibrated: board=" + boardTop + "-" + boardBottom +
+            " pieces=" + piecesTop + "-" + piecesBottom);
     }
 
     private static float getBrightness(Bitmap bmp, int x, int y) {
@@ -126,25 +212,30 @@ public class BoardDetector {
     }
 
     public static float[] getPieceCenter(int screenW, int screenH, int pieceIdx) {
-        int piecesTop  = (int)(screenH * PIECES_TOP);
-        int piecesLeft = (int)(screenW * 0.04f);
-        int pw = (int)(screenW * 0.92f);
-        int ph = (int)(screenH * (PIECES_BOTTOM - PIECES_TOP));
+        int pTop  = (int)(screenH * piecesTop);
+        int pLeft = (int)(screenW * 0.04f);
+        int pw    = (int)(screenW * 0.92f);
+        int ph    = (int)(screenH * (piecesBottom - piecesTop));
         int slotW = pw / 3;
-        float cx = piecesLeft + pieceIdx * slotW + slotW / 2f;
-        float cy = piecesTop + ph / 2f;
+        float cx = pLeft + pieceIdx * slotW + slotW / 2f;
+        float cy = pTop + ph / 2f;
         return new float[]{cx, cy};
     }
 
     public static float[] getBoardCellCenter(int screenW, int screenH, int row, int col) {
-        int boardTop  = (int)(screenH * BOARD_TOP);
-        int boardLeft = (int)(screenW * BOARD_LEFT);
-        int boardW = (int)(screenW * (BOARD_RIGHT - BOARD_LEFT));
-        int boardH = (int)(screenH * (BOARD_BOTTOM - BOARD_TOP));
-        int cellW = boardW / GRID_SIZE;
-        int cellH = boardH / GRID_SIZE;
-        float cx = boardLeft + col * cellW + cellW / 2f;
-        float cy = boardTop + row * cellH + cellH / 2f;
+        int bTop  = (int)(screenH * boardTop);
+        int bLeft = (int)(screenW * boardLeft);
+        int bW    = (int)(screenW * (boardRight - boardLeft));
+        int bH    = (int)(screenH * (boardBottom - boardTop));
+        int cellW = bW / GRID_SIZE;
+        int cellH = bH / GRID_SIZE;
+        float cx = bLeft + col * cellW + cellW / 2f;
+        float cy = bTop + row * cellH + cellH / 2f;
         return new float[]{cx, cy};
+    }
+
+    // Reset calibration (call when game restarts)
+    public static void resetCalibration() {
+        calibrated = false;
     }
 }
